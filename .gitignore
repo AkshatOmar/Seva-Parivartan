@@ -1,1 +1,24 @@
 .worklogs/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+.next/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
