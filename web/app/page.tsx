@@ -130,11 +130,11 @@ export default function LandingPage() {
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {[
-              { icon: ArrowLeftRight, title: 'Instant Matching',      desc: 'Algorithm finds your 2-way match the moment you save your profile — no manual searching.' },
-              { icon: Shield,        title: 'Privacy First',         desc: 'Mobile numbers are revealed only after both parties accept the connection.' },
-              { icon: Users,         title: 'Same Designation Only', desc: 'Matches PGT with PGT, TGT with TGT — so your mutual transfer application is valid.' },
-              { icon: MapPin,        title: 'All UP Districts',      desc: 'All 75 Uttar Pradesh districts are covered, with more states coming soon.' },
-              { icon: CheckCircle,   title: 'Free Forever',          desc: 'No subscription, no premium tier. A service for teachers, not a business.' },
+              { icon: ArrowLeftRight, title: 'Instant Matching', desc: 'Algorithm finds your 2-way match the moment you save your profile — no manual searching.' },
+              { icon: Shield, title: 'Privacy First', desc: 'Mobile numbers are revealed only after both parties accept the connection.' },
+              { icon: Users, title: 'Same Designation Only', desc: 'Matches PGT with PGT, TGT with TGT — so your mutual transfer application is valid.' },
+              { icon: MapPin, title: 'All UP Districts', desc: 'All 75 Uttar Pradesh districts are covered, with more states coming soon.' },
+              { icon: CheckCircle, title: 'Free Forever', desc: 'No subscription, no premium tier. A service for teachers, not a business.' },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="border border-border rounded-lg p-5 bg-card">
                 <Icon className="w-5 h-5 text-primary mb-3" />
