@@ -10,11 +10,11 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 export default function DashboardPage() {
-  const [matches, setMatches]     = useState<MatchProfile[]>([]);
-  const [sent, setSent]           = useState<Set<string>>(new Set());
-  const [loading, setLoading]     = useState(true);
+  const [matches, setMatches] = useState<MatchProfile[]>([]);
+  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
   const [sendingId, setSendingId] = useState<string | null>(null);
-  const [myId, setMyId]           = useState('');
+  const [myId, setMyId] = useState('');
 
   useEffect(() => {
     async function init() {
@@ -99,7 +99,7 @@ export default function DashboardPage() {
         <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
           {matches.map(match => {
             const alreadySent = sent.has(match.id);
-            const isSending   = sendingId === match.id;
+            const isSending = sendingId === match.id;
 
             return (
               <div
@@ -112,10 +112,9 @@ export default function DashboardPage() {
                       {match.full_name}
                     </p>
                     {match.verification_status === 'verified' && (
-                      <ShieldCheck
-                        className="w-3.5 h-3.5 text-primary shrink-0"
-                        title="Verified teacher"
-                      />
+                      <span title="Verified teacher">
+                        <ShieldCheck className="w-3.5 h-3.5 text-primary shrink-0" />
+                      </span>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
