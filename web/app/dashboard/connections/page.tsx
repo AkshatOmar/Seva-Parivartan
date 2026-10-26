@@ -1,171 +1,242 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { api } from '@/lib/api';
+import { api, Connection } from '@/lib/api';
 import { toast } from 'sonner';
-import { Check, X, Clock, Users, MessageSquare } from 'lucide-react';
-import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ArrowRight, Loader2, Inbox } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
-const statusColor: Record<string, string> = {
-  pending:  'bg-amber-100 text-amber-700 border-amber-200',
-  accepted: 'bg-green-100 text-green-700 border-green-200',
-  rejected: 'bg-red-100 text-red-700 border-red-200',
-  withdrawn: 'bg-muted text-muted-foreground',
-};
+type StatusVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+
+function statusVariant(s: string): StatusVariant {
+  if (s === 'accepted')  return 'default';
+  if (s === 'rejected')  return 'destructive';
+  if (s === 'withdrawn') return 'outline';
+  return 'secondary';
+}
+
+function statusLabel(s: string) {
+  if (s === 'withdrawn') return 'Withdrawn';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 export default function ConnectionsPage() {
-  const [connections, setConnections] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [myId, setMyId] = useState('');
-
-  const token = typeof window !== 'undefined' ? localStorage.getItem('sp_token') || '' : '';
+  const [conns, setConns]             = useState<Connection[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [myId, setMyId]               = useState('');
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api.connections.list(token),
-      api.profile.get(token),
-    ]).then(([conns, prof]: any) => {
-      setConnections(conns.data || []);
-      setMyId(prof.data?.id || '');
-    }).catch(console.error).finally(() => setLoading(false));
+    async function init() {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) setMyId(session.user.id);
+      await load();
+    }
+    init();
   }, []);
 
-  async function respond(id: string, status: 'accepted' | 'rejected' | 'withdrawn') {
+  async function load() {
     try {
-      await api.connections.respond(token, id, status);
-      setConnections(prev => prev.map(c =>
-        c.id === id ? { ...c, status } : c
-      ));
-      toast.success(`Request ${status}`);
+      const res = await api.connections.list();
+      setConns(res.data);
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
-  const received = connections.filter(c => c.receiver?.id !== myId ? false : true);
-  const sent     = connections.filter(c => c.sender?.id === myId);
+  async function respond(id: string, status: 'accepted' | 'rejected') {
+    setRespondingId(id);
+    try {
+      await api.connections.respond(id, status);
+      setConns(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+      toast.success(status === 'accepted' ? 'Request accepted' : 'Request rejected');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setRespondingId(null);
+    }
+  }
 
-  function ConnectionCard({ conn, isSent }: { conn: any; isSent: boolean }) {
-    const other = isSent ? conn.receiver : conn.sender;
-    return (
-      <Card className="border-border/50">
-        <CardContent className="pt-5 pb-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-bold truncate">{other?.full_name}</h3>
-                <Badge className={`text-xs border ${statusColor[conn.status] || ''}`}>
-                  {conn.status}
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {other?.designation?.name} · {other?.department?.name}
-              </p>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                📍 {other?.current_location?.name}, {other?.current_location?.state_name}
-              </p>
-              {conn.message && (
-                <p className="text-sm mt-2 italic text-muted-foreground border-l-2 border-border pl-3">
-                  &ldquo;{conn.message}&rdquo;
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground mt-2">
-                <Clock className="inline w-3 h-3 mr-1" />
-                {new Date(conn.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-              </p>
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-col gap-2 flex-shrink-0">
-              {conn.status === 'pending' && !isSent && (
-                <>
-                  <Button size="sm" className="gap-1 bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => respond(conn.id, 'accepted')}>
-                    <Check className="w-3.5 h-3.5" /> Accept
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-1 text-red-600 border-red-200 hover:bg-red-50"
-                    onClick={() => respond(conn.id, 'rejected')}>
-                    <X className="w-3.5 h-3.5" /> Decline
-                  </Button>
-                </>
-              )}
-              {conn.status === 'pending' && isSent && (
-                <Button size="sm" variant="outline"
-                  onClick={() => respond(conn.id, 'withdrawn')}>
-                  Withdraw
-                </Button>
-              )}
-              {conn.status === 'accepted' && (
-                <Link href="/dashboard/messages">
-                  <Button size="sm" className="gradient-saffron text-white border-0 gap-1">
-                    <MessageSquare className="w-3.5 h-3.5" /> Chat
-                  </Button>
-                </Link>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
+  async function withdraw(id: string) {
+    setWithdrawingId(id);
+    try {
+      await api.connections.respond(id, 'withdrawn');
+      setConns(prev => prev.map(c => c.id === id ? { ...c, status: 'withdrawn' } : c));
+      toast.success('Connection request withdrawn');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setWithdrawingId(null);
+    }
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading connections…</span>
       </div>
     );
   }
 
+  const received = conns.filter(c => c.target?.id === myId);
+  const sent     = conns.filter(c => c.requester?.id === myId);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Connections</h1>
-        <p className="text-muted-foreground text-sm mt-1">Manage your connection requests</p>
-      </div>
+    <div className="space-y-8">
+      <h1 className="text-xl font-bold text-foreground">Connections</h1>
 
-      <Tabs defaultValue="received">
-        <TabsList>
-          <TabsTrigger value="received" id="tab-received">
-            Received
-            {received.filter(c => c.status === 'pending').length > 0 && (
-              <Badge className="ml-2 bg-primary text-primary-foreground text-xs h-5 w-5 p-0 flex items-center justify-center">
-                {received.filter(c => c.status === 'pending').length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="sent" id="tab-sent">Sent ({sent.length})</TabsTrigger>
-        </TabsList>
+      {/* ── Received ─────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+          Received requests · {received.length}
+        </h2>
 
-        <TabsContent value="received" className="space-y-4 mt-4">
-          {received.length === 0 ? (
-            <div className="text-center py-16">
-              <Users className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-              <p className="text-muted-foreground">No requests received yet</p>
-            </div>
-          ) : (
-            received.map(c => <ConnectionCard key={c.id} conn={c} isSent={false} />)
-          )}
-        </TabsContent>
+        {received.length === 0 ? (
+          <EmptyState text="No requests received yet" />
+        ) : (
+          <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
+            {received.map(c => (
+              <div
+                key={c.id}
+                className="bg-card px-4 py-3.5 sm:px-5 flex items-center justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground text-sm truncate">
+                    {c.requester?.full_name}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                    <Badge variant="secondary" className="text-xs font-normal">
+                      {c.requester?.designation}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      {c.requester?.current_dist}
+                      <ArrowRight className="w-3 h-3" />
+                      {c.requester?.desired_dist}
+                    </span>
+                  </div>
+                  {c.message && (
+                    <p className="text-xs text-muted-foreground mt-1.5 italic">
+                      &ldquo;{c.message}&rdquo;
+                    </p>
+                  )}
+                  {/* Mobile only revealed after acceptance */}
+                  {c.requester?.mobile && c.status === 'accepted' && (
+                    <p className="text-xs text-foreground mt-1 font-medium">
+                      📞 {c.requester.mobile}
+                    </p>
+                  )}
+                </div>
 
-        <TabsContent value="sent" className="space-y-4 mt-4">
-          {sent.length === 0 ? (
-            <div className="text-center py-16">
-              <Users className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-              <p className="text-muted-foreground">
-                You haven&apos;t sent any requests yet.{' '}
-                <Link href="/dashboard/matches" className="text-primary hover:underline">Browse matches</Link>.
-              </p>
-            </div>
-          ) : (
-            sent.map(c => <ConnectionCard key={c.id} conn={c} isSent={true} />)
-          )}
-        </TabsContent>
-      </Tabs>
+                {c.status === 'pending' ? (
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      disabled={respondingId === c.id}
+                      onClick={() => respond(c.id, 'accepted')}
+                    >
+                      {respondingId === c.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : 'Accept'
+                      }
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={respondingId === c.id}
+                      onClick={() => respond(c.id, 'rejected')}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                ) : (
+                  <Badge variant={statusVariant(c.status)} className="shrink-0 capitalize">
+                    {statusLabel(c.status)}
+                  </Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Sent ─────────────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+          Sent requests · {sent.length}
+        </h2>
+
+        {sent.length === 0 ? (
+          <EmptyState text="You haven't sent any requests yet" />
+        ) : (
+          <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
+            {sent.map(c => (
+              <div
+                key={c.id}
+                className="bg-card px-4 py-3.5 sm:px-5 flex items-center justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground text-sm truncate">
+                    {c.target?.full_name}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                    <Badge variant="secondary" className="text-xs font-normal">
+                      {c.target?.designation}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      {c.target?.current_dist}
+                      <ArrowRight className="w-3 h-3" />
+                      {c.target?.desired_dist}
+                    </span>
+                  </div>
+                  {/* Mobile revealed after acceptance */}
+                  {c.target?.mobile && c.status === 'accepted' && (
+                    <p className="text-xs text-foreground mt-1 font-medium">
+                      📞 {c.target.mobile}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant={statusVariant(c.status)} className="capitalize">
+                    {statusLabel(c.status)}
+                  </Badge>
+                  {/* Allow withdrawal of pending requests */}
+                  {c.status === 'pending' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={withdrawingId === c.id}
+                      onClick={() => withdraw(c.id)}
+                      className="text-muted-foreground text-xs h-7 px-2"
+                    >
+                      {withdrawingId === c.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : 'Withdraw'
+                      }
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="border border-dashed border-border rounded-lg py-10 px-6 text-center">
+      <Inbox className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+      <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   );
 }

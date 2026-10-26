@@ -1,89 +1,75 @@
 import { Router, Response } from 'express';
-import { z } from 'zod';
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabase';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// ── GET /api/connections ───────────────────────────────────────
-router.get('/', async (req: AuthRequest, res: Response) => {
-  if (!req.employeeId) {
-    res.status(400).json({ error: 'Profile not found' });
-    return;
-  }
+// ── Helper: select fields for a profile within a connection ──
+// Mobile is included here; the API decides whether to expose it
+// based on connection status before sending to the client.
+const PROFILE_SELECT =
+  'id, full_name, designation, mobile, current_dist, desired_dist, current_district_id, desired_district_id';
 
-  const { data, error } = await supabase
-    .from('connection_requests')
-    .select(`
-      id, status, message, created_at, responded_at,
-      sender:employee_profiles!sender_id(id, full_name, department:departments(name), designation:designations(name), current_location:posting_locations(name, state_name)),
-      receiver:employee_profiles!receiver_id(id, full_name, department:departments(name), designation:designations(name), current_location:posting_locations(name, state_name)),
-      match:matches(id, match_score)
-    `)
-    .or(`sender_id.eq.${req.employeeId},receiver_id.eq.${req.employeeId}`)
+const CONNECTION_SELECT = `
+  id, status, message, created_at, responded_at,
+  requester:requester_id(${PROFILE_SELECT}),
+  target:target_id(${PROFILE_SELECT})
+`;
+
+// GET /api/connections — list all connections (sent + received)
+router.get('/', async (req: AuthRequest, res: Response) => {
+  const { data, error } = await supabaseAdmin
+    .from('connections')
+    .select(CONNECTION_SELECT)
+    .or(`requester_id.eq.${req.userId!},target_id.eq.${req.userId!}`)
     .order('created_at', { ascending: false });
 
-  if (error) {
-    res.status(500).json({ error: error.message });
-    return;
-  }
-  res.json({ data });
+  if (error) { res.status(500).json({ error: error.message }); return; }
+
+  // Strip mobile numbers unless the connection is accepted
+  const sanitised = (data || []).map((conn: any) => {
+    if (conn.status !== 'accepted') {
+      if (conn.requester) conn.requester.mobile = undefined;
+      if (conn.target)    conn.target.mobile    = undefined;
+    }
+    return conn;
+  });
+
+  res.json({ data: sanitised });
 });
 
-// ── POST /api/connections ─────────────────────────────────────
-const sendRequestSchema = z.object({
-  match_id: z.string().uuid(),
-  message:  z.string().max(500).optional(),
-});
-
+// POST /api/connections — send a connection request
 router.post('/', async (req: AuthRequest, res: Response) => {
-  if (!req.employeeId) {
-    res.status(400).json({ error: 'Profile not found' });
+  const { target_id, message } = req.body;
+  if (!target_id) { res.status(400).json({ error: 'target_id is required' }); return; }
+
+  // Prevent self-connection at the API layer (DB also enforces this)
+  if (target_id === req.userId) {
+    res.status(400).json({ error: 'You cannot connect with yourself' });
     return;
   }
 
-  const parsed = sendRequestSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+  // Verify the target has a complete, active profile before allowing a request
+  const { data: targetProfile } = await supabaseAdmin
+    .from('profiles')
+    .select('is_active, profile_completed')
+    .eq('id', target_id)
+    .maybeSingle();
+
+  if (!targetProfile?.is_active || !targetProfile?.profile_completed) {
+    res.status(400).json({ error: 'That teacher profile is not available for connection requests.' });
     return;
   }
 
-  // Get match to determine receiver
-  const { data: match, error: matchError } = await supabase
-    .from('matches')
-    .select('employee_a_id, employee_b_id, status')
-    .eq('id', parsed.data.match_id)
-    .or(`employee_a_id.eq.${req.employeeId},employee_b_id.eq.${req.employeeId}`)
-    .single();
-
-  if (matchError || !match) {
-    res.status(404).json({ error: 'Match not found' });
-    return;
-  }
-
-  if (match.status !== 'active') {
-    res.status(400).json({ error: 'Match is no longer active' });
-    return;
-  }
-
-  const receiver_id = match.employee_a_id === req.employeeId
-    ? match.employee_b_id
-    : match.employee_a_id;
-
-  const { data, error } = await supabase
-    .from('connection_requests')
-    .insert({
-      match_id:    parsed.data.match_id,
-      sender_id:   req.employeeId,
-      receiver_id,
-      message:     parsed.data.message,
-    })
+  const { data, error } = await supabaseAdmin
+    .from('connections')
+    .insert({ requester_id: req.userId!, target_id, message: message || '' })
     .select()
     .single();
 
   if (error) {
     if (error.code === '23505') {
-      res.status(409).json({ error: 'Connection request already sent' });
+      res.status(409).json({ error: 'You already sent a request to this person.' });
       return;
     }
     res.status(500).json({ error: error.message });
@@ -92,58 +78,54 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   res.status(201).json({ data });
 });
 
-// ── PUT /api/connections/:id ──────────────────────────────────
-const respondSchema = z.object({
-  status: z.enum(['accepted', 'rejected', 'withdrawn']),
-});
-
+// PUT /api/connections/:id — accept, reject, or withdraw a request
 router.put('/:id', async (req: AuthRequest, res: Response) => {
-  if (!req.employeeId) {
-    res.status(400).json({ error: 'Profile not found' });
+  const { status } = req.body;
+  const allowed = ['accepted', 'rejected', 'withdrawn'] as const;
+
+  if (!allowed.includes(status)) {
+    res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
     return;
   }
 
-  const parsed = respondSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  // Get request first
-  const { data: existing, error: fetchError } = await supabase
-    .from('connection_requests')
-    .select('sender_id, receiver_id, status')
+  // Fetch the connection to verify participant roles
+  const { data: existing } = await supabaseAdmin
+    .from('connections')
+    .select('requester_id, target_id, status')
     .eq('id', req.params.id)
-    .single();
+    .maybeSingle();
 
-  if (fetchError || !existing) {
-    res.status(404).json({ error: 'Connection request not found' });
+  if (!existing) {
+    res.status(404).json({ error: 'Connection not found' });
     return;
   }
 
-  // withdrawn = only sender can withdraw
-  if (parsed.data.status === 'withdrawn' && existing.sender_id !== req.employeeId) {
-    res.status(403).json({ error: 'Only sender can withdraw' });
+  if (existing.status !== 'pending') {
+    res.status(409).json({ error: 'Only pending requests can be updated' });
     return;
   }
 
-  // accepted/rejected = only receiver
-  if (['accepted', 'rejected'].includes(parsed.data.status) && existing.receiver_id !== req.employeeId) {
-    res.status(403).json({ error: 'Only receiver can accept or reject' });
+  // Authorisation check: target can accept/reject; requester can withdraw
+  const isTarget    = existing.target_id    === req.userId;
+  const isRequester = existing.requester_id === req.userId;
+
+  if (status === 'withdrawn' && !isRequester) {
+    res.status(403).json({ error: 'Only the sender can withdraw a request' });
+    return;
+  }
+  if ((status === 'accepted' || status === 'rejected') && !isTarget) {
+    res.status(403).json({ error: 'Only the recipient can accept or reject a request' });
     return;
   }
 
-  const { data, error } = await supabase
-    .from('connection_requests')
-    .update({ status: parsed.data.status, responded_at: new Date().toISOString() })
+  const { data, error } = await supabaseAdmin
+    .from('connections')
+    .update({ status })
     .eq('id', req.params.id)
     .select()
-    .single();
+    .maybeSingle();
 
-  if (error) {
-    res.status(500).json({ error: error.message });
-    return;
-  }
+  if (error) { res.status(500).json({ error: error.message }); return; }
   res.json({ data });
 });
 
