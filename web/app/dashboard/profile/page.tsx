@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { api, Profile, District } from '@/lib/api';
 import { toast } from 'sonner';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -12,24 +12,28 @@ import { Loader2, CheckCircle } from 'lucide-react';
 const DESIGNATIONS = ['PGT', 'TGT', 'PRT', 'Lecturer'] as const;
 
 type ProfileForm = {
-  full_name:          string;
-  mobile:             string;
-  designation:        Profile['designation'] | '';
+  full_name: string;
+  mobile: string;
+  designation: Profile['designation'] | '';
   current_district_id: number | '';
   desired_district_id: number | '';
 };
 
-export default function ProfilePage() {
-  const router       = useRouter();
+/**
+ * Inner component -- isolated so the useSearchParams() call is
+ * inside a Suspense boundary (required by Next.js App Router).
+ */
+function ProfileContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const isWelcome    = searchParams.get('welcome') === '1';
+  const isWelcome = searchParams.get('welcome') === '1';
 
   const [form, setForm] = useState<ProfileForm>({
     full_name: '', mobile: '', designation: '',
     current_district_id: '', desired_district_id: '',
   });
-  const [districts, setDistricts]           = useState<District[]>([]);
-  const [saving, setSaving]                 = useState(false);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [saving, setSaving] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
   useEffect(() => {
@@ -42,11 +46,11 @@ export default function ProfilePage() {
         const p = profileRes.data as Profile;
         setDistricts(districtRes.data);
         setForm({
-          full_name:            p.full_name           || '',
-          mobile:               p.mobile              || '',
-          designation:          p.designation         || '',
-          current_district_id:  p.current_district_id ?? '',
-          desired_district_id:  p.desired_district_id ?? '',
+          full_name: p.full_name || '',
+          mobile: p.mobile || '',
+          designation: p.designation || '',
+          current_district_id: p.current_district_id ?? '',
+          desired_district_id: p.desired_district_id ?? '',
         });
       } catch {
         toast.error('Could not load your profile. Please refresh.');
@@ -72,11 +76,11 @@ export default function ProfilePage() {
     setSaving(true);
     try {
       await api.profile.update({
-        full_name:            form.full_name,
-        mobile:               form.mobile,
-        designation:          (form.designation || null) as Profile['designation'],
-        current_district_id:  form.current_district_id === '' ? null : Number(form.current_district_id),
-        desired_district_id:  form.desired_district_id === '' ? null : Number(form.desired_district_id),
+        full_name: form.full_name,
+        mobile: form.mobile,
+        designation: (form.designation || null) as Profile['designation'],
+        current_district_id: form.current_district_id === '' ? null : Number(form.current_district_id),
+        desired_district_id: form.desired_district_id === '' ? null : Number(form.desired_district_id),
       });
       toast.success('Profile saved');
       router.push('/dashboard');
@@ -95,7 +99,7 @@ export default function ProfilePage() {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading profile…</span>
+        <span className="ml-2 text-sm text-muted-foreground">Loading profile...</span>
       </div>
     );
   }
@@ -217,7 +221,7 @@ export default function ProfilePage() {
             {saving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Saving…
+                Saving...
               </>
             ) : (
               'Save profile'
@@ -226,5 +230,19 @@ export default function ProfilePage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <ProfileContent />
+    </Suspense>
   );
 }
