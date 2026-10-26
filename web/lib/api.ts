@@ -5,7 +5,10 @@
  * Next.js frontend (via @/lib/api).
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// In production (Vercel), the /api/* rewrite routes requests to the Express
+// service on the same domain, so no base URL is needed. Locally, set
+// NEXT_PUBLIC_API_URL=http://localhost:4000 in web/.env.local.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 /**
  * Get the Supabase access token from the active session.
@@ -51,7 +54,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       err.message?.includes('NetworkError')
     ) {
       throw new Error(
-        `Cannot connect to backend server (${API_URL}). Please ensure the API is running.`
+        `Cannot connect to backend server${API_URL ? ` (${API_URL})` : ''
+        }. Please ensure the API is running.`
       );
     }
     throw err;
