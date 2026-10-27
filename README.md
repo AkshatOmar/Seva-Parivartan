@@ -4,6 +4,8 @@
 
 Teachers post their current district and desired district. The app finds 2-way matches (same designation, A wants B's location and B wants A's location). They can then send each other connection requests.
 
+**🔗 Live Demo: [seva-parivartan-three.vercel.app](https://seva-parivartan-three.vercel.app/)**
+
 ---
 
 ## Project Structure
