@@ -3,8 +3,7 @@
   "services": {
     "api": {
       "root": "api",
-      "framework": "express",
-      "entrypoint": "src/index.ts"
+      "framework": "express"
     },
     "web": {
       "root": "web",
